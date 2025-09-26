@@ -1030,7 +1030,6 @@ function hud_render() {
     djui_hud_set_color(255, 255, 255, 255)
     djui_hud_set_rotation(logoTilt, 0.5, 0.5)
     let spinMath = (Math.sin((titleScaleSpin + 0.5)*Math.PI))
-    let spinMathNext = (Math.sin((titleScaleSpin*0.95 + 0.5)*Math.PI))
 
     let animState = 0
     let animFrame = 0
@@ -1048,7 +1047,12 @@ function hud_render() {
     }
 
     // Main Logo
-    djui_hud_render_texture_tile(TEX_LOGO, screenWidth*0.25 + titleOffset - 352*logoScale*0.5 * spinMath, screenHeight*0.5 - 352*logoScale*0.5 - (Math.sin((titleOffset/(screenWidth*0.25))*Math.PI)*30) - logoFallPosY, logoScale * spinMath, logoScale, animFrame*352, animState*352, 352, 352)
+    let squashFactor = 0.17
+    let scaleX = logoScale * spinMath * (1 + Math.cbrt(titleScaleSpin/3)*squashFactor)
+    let scaleY = logoScale * (1 - Math.cbrt(titleScaleSpin/3)*squashFactor)
+    djui_hud_render_texture_tile(TEX_LOGO,
+        screenWidth*0.25 + titleOffset - 352*scaleX/2, (screenHeight - 352*scaleY)/2 - (Math.sin((titleOffset/(screenWidth*0.25))*Math.PI)*30) - logoFallPosY,
+        scaleX, scaleY, animFrame*352, animState*352, 352, 352)
     djui_hud_set_color(255, 255, 255, 255)
 
     if (!logoSquishyFlung && titleScaleSpin > 10) {
@@ -1104,7 +1108,7 @@ function hud_render() {
     } else if (mouseX > screenWidth*0.25 - TEX_LOGO.width*logoScale*0.5 && mouseX < screenWidth*0.25 + TEX_LOGO.width*logoScale*0.5 &&
                mouseY > screenHeight*0.5 - TEX_LOGO.height*logoScale*0.5 - (Math.sin((titleOffset/(screenWidth*0.25))*Math.PI)*30) && mouseY < screenHeight*0.5 + TEX_LOGO.height*logoScale*0.5 - (Math.sin((titleOffset/(screenWidth*0.25))*Math.PI)*30)) {
         if ((djui_hud_get_mouse_buttons_pressed() & L_MOUSE_BUTTON) && !currInfoTab) {
-            titleScaleSpin = titleScaleSpin + 2
+            titleScaleSpin += Math.PI/2
         }
     }
 
