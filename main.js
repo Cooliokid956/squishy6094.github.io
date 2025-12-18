@@ -1,29 +1,28 @@
-// Utilities
-function lerp(a, b, alpha) {
-    return a + alpha * ( b - a )
-}
+// Initialize User ID
+async function bootstrapUserID() {
+    let userID = localStorage.getItem('userID');
+    if (!userID) {
+        try {
+            const res = await fetch("https://squishy-site-backend.vercel.app/api/user-id", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            });
 
-function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value))
-}
+            if (!res.ok) {
+                console.error("Failed to Initialize UserID:", res.status);
+                return null;
+            }
 
-function remap(a, b, c, d, x) {
-    return c + (d - c) * ((x - a) / (b - a))
+            // Backend returns plain text UUID
+            userID = await res.text();
+            localStorage.setItem('userID', userID);
+        } catch (err) {
+            console.error("Failed to Initialize UserID:", err);
+            return null;
+        }
+    }
+    return userID;
 }
-
-function random(a, b) {
-    return remap(0, 1, a, b, Math.random())
-}
-
-function is_client_firefox() {
-    return navigator.userAgent.toLowerCase().indexOf('firefox') >= 0;  
-}
-
-function is_client_mobile() { // Assume client is mobile from SAFE_N64 being active
-    return djui_hud_get_screen_height()/240
-}
-
-if (is_client_firefox()) djui_hud_popup_create("Warning!!\nSquishy Site has been\nreportedly Unstable on\nFirefox based Clients!", 4)
 
 // Grab External Data
 function get_current_time_string() {
@@ -108,24 +107,34 @@ async function load_github_commit_rate(username, days = 30, token = null) {
     return commitRatePromise
 }
 
+let isMessageSending = false
+let isMessageSent = false
 let personalMessageCooldown = 0
 let personalMessageBanned = false
+let personalMessageFailed = false
 async function send_webhook_message(message) {
+    const userID = await bootstrapUserID();
+    if (!userID) return false;
+    
+    if (isMessageSending || personalMessageCooldown - Date.now() > 0) return;
+
+    if (message === "")
+        return
     if (message.toLowerCase() === "gaster")
         location.reload()
 
+    isMessageSending = true;
     // Always try to send, backend will enforce cooldown
     const response = await fetch("https://squishy-site-backend.vercel.app/api/send-discord", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message })
-    })
+        body: JSON.stringify({ message, userID })
+    });
 
     const data = await response.json()
-
     if (response.ok && !data.error) {
         djui_hud_popup_create("Squishy Site Messages:\nMessage sent!", 2)
-        djui_hud_text_input_state.success = true
+        isMessageSent = true
         // Set new cooldown for 15 minutes from now
         personalMessageCooldown = Date.now() + 15 * 60 * 1000
         squishyAssistantState = 1
@@ -133,125 +142,20 @@ async function send_webhook_message(message) {
     } else if (data && data.banned) {
         // Backend returned banned, fuck you
         personalMessageBanned = true
-        djui_hud_text_input_state.success = false
+        isMessageSent = false
     } else if (data && data.cooldown) {
         // Backend returned cooldown, set it
         personalMessageCooldown = data.cooldown
-        djui_hud_text_input_state.success = false
+        isMessageSent = false
         djui_hud_popup_create(`Squishy Site Messages:\nCooldown active, cannot\nsend message until:\n${new Date(personalMessageCooldown).toLocaleTimeString()}`, 4)
     } else {
         djui_hud_popup_create("Squishy Site Messages:\nFailed to send message!\nError Info has been logged\nin the console!", 4)
         console.error("Failed to send:", data && data.error ? data.error : await response.text())
-        djui_hud_text_input_state.success = false
-    }
-}
-
-// Helper Functions
-function djui_hud_render_slider(sliderPos, x, y, width, height) {
-    let mouseX = djui_hud_get_mouse_x()
-    let mouseY = djui_hud_get_mouse_y()
-
-    djui_hud_set_color(255, 255, 255, 255)
-    djui_hud_render_rect(x, y, width, 1)
-    djui_hud_render_rect(x, y + height - 1, width, 1)
-    djui_hud_render_rect(x, y, 1, height)
-    djui_hud_render_rect(x + width - 1, y, 1, height)
-
-    djui_hud_render_rect(x + 2, y + 2, (width - 4)*sliderPos, height - 4)
-    
-    if ((mouseX > x && mouseX < x + width) && (mouseY > y && mouseY < y + height)) {
-        if (djui_hud_get_mouse_buttons_down() & L_MOUSE_BUTTON) {
-            sliderPos = (mouseX - (x + 2))/(width - 4)
-            sliderPos = clamp(sliderPos, 0, 1)
-        }
-    }
-    return sliderPos
-}
-
-// Simple text input field for djui_hud
-let djui_hud_text_input_state = {
-    active: false,
-    value: "",
-    cursor: 0,
-    sent: false,
-    success: null,
-    lastFrameActive: false
-}
-
-function djui_hud_render_text_input(textValue, x, y, width, height) {
-    let mouseX = djui_hud_get_mouse_x()
-    let mouseY = djui_hud_get_mouse_y()
-    let isInside = (mouseX > x && mouseX < x + width) && (mouseY > y && mouseY < y + height)
-
-    // Draw box
-    width = Math.max(width, djui_hud_measure_text(textValue) * 0.3 + 8)
-    djui_hud_set_color(255, 255, 255, 255)
-    djui_hud_render_rect(x, y, width, height)
-
-    // Draw text
-    djui_hud_set_color(0, 0, 0, 255)
-    let textY = y + (height/2) - 5
-    djui_hud_print_text(textValue, x + 4, textY, 0.3)
-
-    // Handle focus
-    if (isInside && djui_hud_get_mouse_buttons_pressed() & L_MOUSE_BUTTON) {
-        djui_hud_text_input_state.active = true
-        djui_hud_text_input_state.value = textValue
-        djui_hud_text_input_state.cursor = textValue.length
-    } else if (!isInside && djui_hud_get_mouse_buttons_pressed() & L_MOUSE_BUTTON) {
-        djui_hud_text_input_state.active = false
+        personalMessageFailed = true
+        isMessageSent = false
     }
 
-    // Handle input
-    if (djui_hud_text_input_state.active) {
-        // Draw cursor
-        let cursorX = x + 4 + djui_hud_measure_text(textValue.substring(0, djui_hud_text_input_state.cursor)) * 0.3
-        if ((get_global_timer() % 60) < 30) {
-            djui_hud_set_color(0, 0, 0, 255)
-            djui_hud_print_text("|", cursorX, textY, 0.3)
-        }
-    }
-    djui_hud_text_input_state.lastFrameActive = djui_hud_text_input_state.active
-
-    // Return the possibly updated value
-    return djui_hud_text_input_state.active ? djui_hud_text_input_state.value : textValue
-}
-
-window.addEventListener("keydown", e => {
-    if (!djui_hud_text_input_state.active) return;
-    djui_hud_text_input_keydown(e);
-});
-
-function djui_hud_text_input_keydown(e) {
-    if (!djui_hud_text_input_state.active) return
-    // Prevent input if message was sent (value is empty and not active)
-
-    let val = djui_hud_text_input_state.value
-    let cur = djui_hud_text_input_state.cursor
-    if (e.key.length == 1 && val.length < 64) {
-        val = val.slice(0, cur) + e.key + val.slice(cur)
-        cur++
-    } else if (e.key == "Backspace" && cur > 0) {
-        val = val.slice(0, cur - 1) + val.slice(cur)
-        cur--
-    } else if (e.key == "Delete" && cur < val.length) {
-        val = val.slice(0, cur) + val.slice(cur + 1)
-    } else if (e.key == "ArrowLeft" && cur > 0) {
-        cur--
-    } else if (e.key == "ArrowRight" && cur < val.length) {
-        cur++
-    } else if (e.key == "Enter") {
-        if (personalMessageCooldown - Date.now() > 0) return
-        djui_hud_text_input_state.active = false
-        send_webhook_message(djui_hud_text_input_state.value)
-        djui_hud_text_input_state.sent = true
-    } else if (e.key == "Escape") {
-        djui_hud_text_input_state.active = false
-        djui_hud_text_input_state.sent = false
-    }
-    djui_hud_text_input_state.value = val
-    djui_hud_text_input_state.cursor = cur
-    e.preventDefault()
+    isMessageSending = false
 }
 
 let rainbowColor = { r: 255, g: 0, b: 0 }
@@ -302,6 +206,39 @@ let TEXT_WEBSITE_NAME = "Squishy Site"
 let TEXT_WIP = "Nastywerkkk in Progress!!"
 let TEXT_CLICK_ANYWHERE = "Click Anywhere"
 
+const TEX_DOG_HOLE_PATH = get_texture_info("textures/doghole-path.png")
+const TEX_DOG_HOLE_MAIN_PATH = get_texture_info("textures/doghole-main-path.png")
+const dogholeLayers = 3
+function doghole_render() {
+    let width = djui_hud_get_screen_width()
+    let height = djui_hud_get_screen_height()
+    const dogholeSize = 240
+    
+    djui_hud_set_color(0, 0, 0, Math.min(get_global_timer()/90, 1)*255)
+    djui_hud_render_rect(0, 0, width, height)
+    let scale = 0
+    if (titleClick) {
+        for (let i = 1; i < dogholeLayers; i++) {
+            scale = i/dogholeLayers
+            djui_hud_set_color(255, 255, 255, 255)
+            let dogholeWidth = Math.ceil(width/dogholeSize/scale)
+            let dogholeHeight = Math.ceil(height/dogholeSize/scale)
+            for (let w = 0; w <= dogholeWidth; w++) {
+                for (let h = 0; h <= dogholeHeight; h++) {
+                    let x = width*0.5 - dogholeSize*0.5*scale - (Math.ceil(dogholeWidth*0.5) - w)*dogholeSize*scale + Math.floor(((get_global_timer()*Math.abs(i - dogholeLayers)/dogholeLayers*0.05)%(dogholeSize*scale))/scale)*scale
+                    let y = height*0.5 - dogholeSize*0.5*scale - (Math.ceil(dogholeHeight*0.5) - h)*dogholeSize*scale + Math.floor(((get_global_timer()*Math.abs(i - dogholeLayers)/dogholeLayers*0.05)%(dogholeSize*scale))/scale)*scale
+                    djui_hud_render_texture(TEX_DOG_HOLE_PATH, x, y, scale, scale)
+                }
+            }
+            djui_hud_set_color(0, 0, 0, 150 + (1 - clamp((get_global_timer() - titleClickTime - 90)/90, 0, 1))*105)
+            djui_hud_render_rect(0, 0, width, height)
+        }
+
+        djui_hud_set_color(255, 255, 255, 255*Math.min((get_global_timer() - titleClickTime)/60, 1))
+        djui_hud_render_texture(TEX_DOG_HOLE_MAIN_PATH, width*0.5 - TEX_DOG_HOLE_MAIN_PATH.width*0.5, height*0.5 - TEX_DOG_HOLE_MAIN_PATH.height*0.5 - 24, 1, 1)
+    }
+}
+
 // Music
 const musicTracks = [
     { name: "Character Select - In-Game Theme",              artist: "Trashcam",                audio: 'char-select-menu-theme' },
@@ -312,8 +249,9 @@ const musicTracks = [
     { name: "Sonic Unleashed - Windmill Isle (Night)",       artist: "Sonic Team",              audio: 'windmill-isle-night' },
     { name: "Kirby's Dream Land 3 - Game Over (JP Version)", artist: "Nintendo / SiIvaGunner",  audio: 'kirby-game-over' },
     // Gay People, 10 am!
-    { name: "DELTARUNE - Hip Shop",                    artist: "Toby Fox",                audio: 'hip-shop' },
-    { name: "UNDERTALE - Him",                         artist: "Toby Fox",                audio: 'him' },
+    { name: "DELTARUNE - Hip Shop",                          artist: "Toby Fox",                audio: 'hip-shop' },
+    { name: "UNDERTALE - Him",                               artist: "Toby Fox",                audio: 'him' },
+    { name: "UNDERTALE 10th - Dog Hole",                     artist: "Toby Fox",                audio: 'dog-hole' , background: doghole_render},
 ]
 const currMusicTrack = musicTracks[Math.floor(Math.random()*musicTracks.length)]
 
@@ -539,12 +477,16 @@ function info_tab_render_about_me(x, y, width, height) {
     textY += 8; djui_hud_print_text(`Age: ${currAge}`,               textX, textY, 0.25)
     textY += 8; djui_hud_print_text((commitRate ? `Commit Rate: ${commitRate}/wk` : "Loading Commit Rate..."), textX, textY, 0.25)
 
+    let t = djui_hud_get_text_input_state("personalMessage")
+    if (t.function == null)
+        t.function = send_webhook_message
+
     let messageStatus = `${personalMessage.length}/64`
-    if (djui_hud_text_input_state.sent) {
+    if (isMessageSending) {
         messageStatus = "Sending..."
-        if (djui_hud_text_input_state.success) {
+        if (isMessageSent) {
             messageStatus = "Sent!"
-        } else if (djui_hud_text_input_state.success === false) {
+        } else {
             if (personalMessageBanned) {
                 messageStatus = `Banned from Service`
             } else if (personalMessageCooldown > Date.now()) {
@@ -554,9 +496,9 @@ function info_tab_render_about_me(x, y, width, height) {
                 let secStr = sec < 10 ? "0" + sec : sec
                 messageStatus = `${min}:${secStr}`
                 if (msLeft < 1000) {
-                    djui_hud_text_input_state.sent = false
+                    isMessageSending = false
                 }
-            } else {
+            } else if (personalMessageFailed) {
                 messageStatus = "Failed!"
             }
         }
@@ -564,11 +506,19 @@ function info_tab_render_about_me(x, y, width, height) {
 
     djui_hud_set_color(255, 255, 255, 255)
     djui_hud_print_text(`Send me a Message!! - ${messageStatus}`, x + 3, y + height - 35, 0.3)
-    personalMessage = djui_hud_render_text_input(personalMessage, x + 3, y + height - 25, 100, 15)
+    personalMessage = djui_hud_render_text_input("personalMessage", x + 3, y + height - 25, 100, 15)
     djui_hud_set_color(255, 255, 255, 150)
     djui_hud_print_text("(Messages are publicly viewable but anonymous)", x + 3, y + height - 8, 0.2)
 
-        // Message Assistant
+    djui_hud_set_color(255, 255, 255, 255)
+    if (djui_hud_render_button("Send", x + 3 + Math.max(100, djui_hud_measure_text(personalMessage) * 0.3 + 8), y + height - 25, 30, 15)) {
+        if (!isMessageSending && personalMessageCooldown - Date.now() <= 0) {
+            let t = djui_hud_get_text_input_state("personalMessage")
+            t.function(t.value)
+        }
+    }
+
+    // Message Assistant
     if (squishyAssistantState == 1) {
         squishyAssistantRender = Math.min(Math.floor(squishyAssistantFrame/5), 7) * 160
     } else {
@@ -577,7 +527,7 @@ function info_tab_render_about_me(x, y, width, height) {
     squishyAssistantFrame = squishyAssistantFrame + 1
 
     djui_hud_set_color(255, 255, 255, 255)
-    djui_hud_render_texture_tile(TEX_SQUISHY_ASSISTANT, x - 3 + Math.max(100, djui_hud_measure_text(personalMessage) * 0.3 + 8), y + height - 65, 0.3, 0.3, squishyAssistantRender, 0, 160, 288)
+    djui_hud_render_texture_tile(TEX_SQUISHY_ASSISTANT, x + 28 + Math.max(100, djui_hud_measure_text(personalMessage) * 0.3 + 8), y + height - 65, 0.3, 0.3, squishyAssistantRender, 0, 160, 288)
 }
 
 const squishyProjects = [
@@ -605,7 +555,7 @@ let artGalleryTable = []
 let artGalleryLoaded = false
 let artGalleryLoading = false
 let artGalleryRawData = null
-
+const rawRepoLink = 'https://raw.githubusercontent.com/Squishy6094/squishy-site-art-gallery/refs/heads/main'
 async function get_art_gallery_json() {
     if (artGalleryLoaded) return true
     if (artGalleryLoading) return false
@@ -616,7 +566,7 @@ async function get_art_gallery_json() {
         // Fetch JSON only once
         if (!artGalleryRawData) {
             const response = await fetch(
-                'https://raw.githubusercontent.com/Squishy6094/squishy-site-art-gallery/refs/heads/main/art-list.json'
+                `${rawRepoLink}/art-list.json`
             )
             artGalleryRawData = await response.json()
         }
@@ -629,7 +579,7 @@ async function get_art_gallery_json() {
             grouped[item.artist].push({
                 ...item,
                 name: nameWithoutExt,
-                url: `https://raw.githubusercontent.com/Squishy6094/squishy-site-art-gallery/refs/heads/main/${encodeURIComponent(item.artist)}/${encodeURIComponent(item.img)}`,
+                url: `${rawRepoLink}/${encodeURIComponent(item.artist)}/low-quality/${encodeURIComponent(item.img)}`,
                 texture: null
             })
         }
@@ -756,13 +706,20 @@ function info_tab_render_art_gallery(x, y, width, height) {
                 mouseY > itemY && mouseY < itemY + imgH &&
                 mousePressed
             ) {
-                focusImageFile = item
+                // Make a copy so we don’t overwrite the low-quality thumbnail item
+                focusImageFile = { ...item }
                 focusImage = true
                 focusImageDelay = 3
                 SOUND_ART_OPEN.play()
+
+                // Load full-resolution image instead of low-quality
+                const fullResUrl = `${rawRepoLink}/${encodeURIComponent(item.artist)}/${encodeURIComponent(item.img)}`
+                focusImageFile.url = fullResUrl
+                focusImageFile.texture = get_texture_info(fullResUrl)
             }
-            if (true) { //((itemY + imgH + 5) > 0 && (itemY) < x + height) {
-                // Only render if on screen
+
+            // Only render if on screen
+            if ((itemY + imgH + 5) > 0 && (itemY) < x + height) {
                 djui_hud_render_texture(item.texture, itemX, itemY, scale, scale)
             }
             imgHeights[i%imagesPerRow] += imgH + 5 // Move down for next artist
@@ -796,8 +753,13 @@ function info_tab_render_art_gallery(x, y, width, height) {
         djui_hud_render_texture(focusImageFile.texture, imgX, imgY, scale, scale)
         const artName = focusImageFile.name + " - " + focusImageFile.artist
         djui_hud_print_text(artName, imgX + imgW*0.5 - djui_hud_measure_text(artName)*0.25, imgY - 17, 0.5)
-        // Click anywhere to close
-        if (mousePressed && focusImageDelay === 0) {
+        if (imgH == 0) {
+            djui_hud_print_text("Loading Full Quality Art...", imgX + imgW*0.5 - djui_hud_measure_text("Loading Full Quality Art...")*0.25, imgY + imgH + 1, 0.5)
+        }
+        if (djui_hud_render_button("Open Raw", x + 3, y + height - 18 + focusImageX*0.2, 40, 15)) {
+            window.open(focusImageFile.url)
+        } else if (mousePressed && focusImageDelay === 0) {
+            // Click anywhere to close
             focusImage = false
             focusImageDelay = 3
             SOUND_ART_CLOSE.play()
@@ -840,10 +802,17 @@ window.addEventListener('wheel', function(e) {
     }
 })
 
+// Sanity check saved colors
+if (localStorage.getItem("prefColorR") == null)
+    localStorage.setItem("prefColorR", 0)
+if (localStorage.getItem("prefColorG") == null)
+    localStorage.setItem("prefColorG", 80/255)
+if (localStorage.getItem("prefColorB") == null)
+    localStorage.setItem("prefColorB", 30/255)
 
-let optionColorR = (localStorage.getItem("prefColorR") || 0       ) * 0.25
-let optionColorG = (localStorage.getItem("prefColorG") || (80/255)) * 0.25
-let optionColorB = (localStorage.getItem("prefColorB") || (30/255)) * 0.25
+let optionColorR = localStorage.getItem("prefColorR") * 0.4
+let optionColorG = localStorage.getItem("prefColorG") * 0.4
+let optionColorB = localStorage.getItem("prefColorB") * 0.4
 
 let bgColorRaw = { r: optionColorR*255, g: optionColorG*255, b: optionColorB*255 }
 let bgColor = bgColorRaw
@@ -1015,6 +984,10 @@ function hud_render() {
                 djui_hud_set_color(bgColor.r*0.5 + glow, bgColor.g*0.5 + glow, bgColor.b*0.5 + glow, 255)
                 djui_hud_render_rect(w * bgCheckerSize, h * bgCheckerSize, bgCheckerSize, bgCheckerSize)
             }
+    
+    if (currMusicTrack.background != null) {
+        currMusicTrack.background()
+    }
     
     djui_hud_set_color(0, 0, 0, logoFlash)
     djui_hud_render_rect(0, 0, screenWidth, screenHeight)
