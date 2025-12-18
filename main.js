@@ -941,10 +941,12 @@ let recordRot = 0
 let recordDragStart = 0
 let recordHeld = false
 
+let recordClickTimer = 0
+let recordFocus = false
 let recordStress = 0
 let recordBreakSpin = 0
 let recordBroken = false
-let recordPos = { x: 0, y: 0 }
+let recordPos = { x: 0, y: 0, z: 0.5 }
 let recordVel = { x: 0, y: 0 }
 let musicTitlePos = { x: 0, y: 0 }
 let musicTitleVel = { x: 0, y: 0 }
@@ -1048,10 +1050,11 @@ function hud_render() {
 
     djui_hud_set_rotation(0, 0, 0)
     if (!titleClick) {
-        if ((djui_hud_get_mouse_buttons_pressed() & L_MOUSE_BUTTON === 1 || keyTitleClick)) {
+        if ((djui_hud_get_mouse_buttons_pressed() & L_MOUSE_BUTTON == 1 || keyTitleClick)) {
             // Initialize like EVERYTHING
             titleClick = true
             titleClickTime = get_global_timer()
+            recordPos = { x: screenWidth, y: screenHeight, z: 0.5 }
             SOUND_CHECKPOINT.play()
             SOUND_MUSIC.play()
             logoFlash = 150
@@ -1189,18 +1192,34 @@ function hud_render() {
         }
 
         // Music Record
-        let recordRadius = TEX_MUSIC_RECORD.width * 0.25
+        if (!recordBroken) {
+            if (recordFocus) {
+                recordPos.x = lerp(recordPos.x, screenWidth/2, 0.2)
+                recordPos.y = lerp(recordPos.y, screenHeight/2, 0.2)
+                recordPos.z = lerp(recordPos.z, 1.2, 0.2)
+            } else {
+                recordPos.x = screenWidth - lerp(screenWidth - recordPos.x, 15 - titleOffset, 0.2)
+                recordPos.y = screenHeight - lerp(screenHeight - recordPos.y, 15 - titleOffset, 0.2)
+                recordPos.z = lerp(recordPos.z, 0.5, 0.2)
+            }
+        }
+        recordClickTimer--
+
+        let recordRadius = TEX_MUSIC_RECORD.width * recordPos.z/2
         if (!recordBroken) {
             let userSpeedTarget = SOUND_MUSIC.playing ? (recordSpeedTarget * ((musicSpeedModRange*0.5) + optionMusicSpeed*musicSpeedModRange)) : 0
-            let distFromRecord = Math.hypot((screenWidth - 15) - mouseX, (screenHeight - 15 + titleOffset) - mouseY)
-            let angleToRecord = Math.atan2((screenHeight - 15 + titleOffset) - mouseY, (screenWidth - 15) - mouseX) * 0x8000 / Math.PI + 0x8000
+            let distFromRecord = Math.hypot(recordPos.x - mouseX, recordPos.y - mouseY)
+            let angleToRecord = Math.atan2(recordPos.y - mouseY, recordPos.x - mouseX) * 0x8000 / Math.PI + 0x8000
             
             if (distFromRecord < recordRadius && djui_hud_get_mouse_buttons_pressed() & L_MOUSE_BUTTON) {
                 recordHeld = true
                 recordDragStart = angleToRecord
-            } else if (distFromRecord > recordRadius || djui_hud_get_mouse_buttons_released() & L_MOUSE_BUTTON) {
+                if (recordClickTimer > 0)
+                    recordFocus = !recordFocus
+                else recordClickTimer = 10
+            } else if (distFromRecord > recordRadius || djui_hud_get_mouse_buttons_released() & L_MOUSE_BUTTON)
                 recordHeld = false
-            }
+            
             if (Math.abs(recordDragStart - angleToRecord) > 0x4000) {
                 recordDragStart = angleToRecord
             }
@@ -1209,11 +1228,13 @@ function hud_render() {
                 recordSpeed += (recordDragStart - angleToRecord) / 2
                 recordDragStart = angleToRecord
             } else {
-                if (recordSpeed > userSpeedTarget)
-                    recordSpeed -= recordSlowDown
-                else if (recordSpeed < 0)
-                    recordSpeed += recordBrake
-                else recordSpeed = Math.min(userSpeedTarget, recordSpeed + recordSpeedUp)
+                if (!recordFocus) {
+                    if (recordSpeed > userSpeedTarget)
+                        recordSpeed -= recordSlowDown
+                    else if (recordSpeed < 0)
+                        recordSpeed += recordBrake
+                    else recordSpeed = Math.min(userSpeedTarget, recordSpeed + recordSpeedUp)
+                }
             }
             recordRot += recordSpeed
 
@@ -1254,7 +1275,10 @@ function hud_render() {
         djui_hud_print_text(currMusicTrack.artist, screenWidth - (djui_hud_measure_text(currMusicTrack.artist)*0.3 + 50) * (1 - (titleOffset / (screenWidth * 0.25))) + musicArtistPos.x, screenHeight - 22 + musicArtistPos.y, 0.3)
         djui_hud_print_text(currMusicTrack.name, screenWidth - (djui_hud_measure_text(currMusicTrack.name)*0.3 + 50) * (1 - (titleOffset / (screenWidth * 0.25))) + musicTitlePos.x, screenHeight - 12 + musicTitlePos.y, 0.3)
         djui_hud_set_rotation(recordRot, 0.5, 0.5)
-        djui_hud_render_texture(TEX_MUSIC_RECORD, screenWidth - recordRadius * Math.cos(recordBreakSpin) - 15 + recordPos.x + titleOffset, screenHeight - recordRadius - 15 + recordPos.y + titleOffset, 0.5 * Math.cos(recordBreakSpin), 0.5)
+        djui_hud_render_texture(TEX_MUSIC_RECORD,
+            recordPos.x - recordRadius * Math.cos(recordBreakSpin),
+            recordPos.y - recordRadius,
+            recordPos.z * Math.cos(recordBreakSpin), recordPos.z)
         djui_hud_set_rotation(0, 0, 0)
     } else {
         titleOffset = screenWidth*0.25
